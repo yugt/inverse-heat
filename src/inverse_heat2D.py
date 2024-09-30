@@ -188,7 +188,7 @@ class InverseHeat2D:
         return u[:, self.sensor[:, 0], self.sensor[:, 1]].T
 
 
-def inverse_solver(a_truth, epoch, path='/tmp', frame_drawer=None, sensor_type='moving'):
+def inverse_solver(a_truth, epoch, path='/tmp', frame_drawer=None, sensor_type='moving', num_static_sensors=16):
     """
     Perform the inverse problem-solving loop with visualization.
 
@@ -225,7 +225,7 @@ def inverse_solver(a_truth, epoch, path='/tmp', frame_drawer=None, sensor_type='
         ih2.observe = ih2.get_moving_sensor_measurement(ih2.u)
     elif sensor_type == 'static':
         # Initialize static sensors and extract their measurements
-        ih2.create_sensor(sensor_type='static', n=16)
+        ih2.create_sensor(sensor_type='static', n=num_static_sensors)
         ih2.observe = ih2.get_static_sensor_measurement(ih2.u)
     else:
         raise ValueError(f"Unsupported sensor type: {sensor_type}")
@@ -274,7 +274,7 @@ def inverse_solver(a_truth, epoch, path='/tmp', frame_drawer=None, sensor_type='
             calculate = ih2.get_moving_sensor_measurement(ih2.forward_PDE(a=a_guess))
         elif sensor_type == 'static':
             # Use static sensors (16) to get measurements
-            calculate = ih2.get_static_sensor_measurement(ih2.forward_PDE(a=a_guess), n=16)
+            calculate = ih2.get_static_sensor_measurement(ih2.forward_PDE(a=a_guess))
         else:
             raise ValueError(f"Unsupported sensor type: {sensor_type}")
 
@@ -285,19 +285,23 @@ def inverse_solver(a_truth, epoch, path='/tmp', frame_drawer=None, sensor_type='
         loss.backward()
 
         # Store results of the current epoch
-        df['tbasis'].append(atm.detach().numpy())  # Store parameters
-        df['grad'].append(atm.grad.detach().numpy())  # Store gradients
-        df['loss'][_] = loss.detach()  # Store loss
-        df['error'][_] = l2(ih2.conductivity, a_guess.detach()) / denominator  # Store relative error
+        df['tbasis'].append(atm.detach().numpy())       # Store parameters
+        df['grad'].append(atm.grad.detach().numpy())    # Store gradients
+        df['loss'][_] = loss.detach()   # Store loss
+        df['error'][_] = torch.sqrt(    # Store relative error
+            l2(ih2.conductivity, a_guess.detach()) / denominator)
 
         # Visualize the current state of the inverse solution using `frame_drawer`
-        frame_drawer.inverse_frame(
+        fig = frame_drawer.inverse_frame(
             a_guess.detach().numpy(),
             calculate.detach().numpy(),
             atm.grad.detach().reshape((J, J)).numpy(),
             df['loss'].numpy(),
             df['error'].numpy()
-        ).write_image(f'{path}/epoch-{_:03d}.png')  # Save frame as an image
+        )
+        fig.write_image(f'{path}/epoch-{_:03d}.png')  # Save frame as an image
+        if _ == 0 or _ == epoch - 1:
+            fig.write_image(f'{path}/epoch-{_:03d}.pdf')
 
         # Manual gradient descent update step (update `atm`)
         atm = atm.detach() - atm.grad.detach() * 1e4
